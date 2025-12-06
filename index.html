@@ -23,6 +23,8 @@
     .issue.good{background:rgba(16,185,129,0.06);border-left:4px solid var(--good);color:var(--good)}
     .summary{font-weight:700}
     footer{margin-top:26px;padding:16px;text-align:center;color:var(--muted);font-size:13px}
+    footer a{color:#60a5fa;text-decoration:none;font-weight:700}
+    footer .brand{font-size:16px;font-weight:700}
     .link{word-break:break-all}
     .tag{display:inline-block;padding:4px 8px;border-radius:999px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.03);margin-right:6px;font-size:12px}
     @media (max-width:880px){.results{grid-template-columns:1fr} .container{padding:12px}}
@@ -43,7 +45,7 @@
         <button id="scanBtn">Scan</button>
         <button id="clearBtn" class="secondary">Clear</button>
         <div style="margin-left:auto;color:var(--muted);display:flex;gap:8px;align-items:center">
-          <span class="tag">Heuristics</span><span class="tag">Link analysis</span><span class="tag">Keywords</span><span class="tag">made by Jeabo Ray Saducas</span>
+          <span class="tag">Heuristics</span><span class="tag">Link analysis</span><span class="tag">Keywords</span>
         </div>
       </div>
 
@@ -64,18 +66,27 @@
     </div>
 
     <footer>
-      <!-- User's footer — don't remove -->
-          © 2025 <a href="https://saducasjeaboo.github.io/my-web/" target="_blank">Jeabo Ray Saducas</a> PhishScan. All rights reserved.
+      <span class="brand">PhishScan</span> • Built for learning and awareness<br><br>
+      <h5>© 2025 <a href="#">Jeabo Ray Saducas</a>. All rights reserved.</h5> 
     </footer>
   </main>
 
   <script>
-    // Simple phishing heuristics (client-side only)
-    const urlRegex = /https?:\/\/[\w\-@:%._\+~#=]{2,256}\.[a-z]{2,6}\b([\w@:%_\+.~#?&//=\-]*)/gi;
+    const urlRegex = /https?:\/\/[\w\-@:%._\+~#=]{2,256}\.[a-z]{2,10}\b([\w@:%_\+.~#?&\/\/=\-]*)/gi;
+
     const tinyDomains = ['bit.ly','tinyurl.com','goo.gl','t.co','ow.ly','rb.gy'];
-    const suspiciousTlds = ['.tk','ml','ga','cf','gq'];
-    const urgentWords = ['urgent','immediately','verify','verify your','verify account','suspend','suspended','limited time','action required','update your','reset your','confirm your','click here to','login to your'];
-    const credentialWords = ['password','ssn','social security','credit card','pin','account number','verify identity','login','username'];
+    const suspiciousTlds = ['.tk','ml','ga','cf','gq','.buzz','.xyz'];
+
+    const tunnelDomains = [
+      'trycloudflare.com',
+      'ngrok.io',
+      'repl.co',
+      '000webhostapp.com',
+      'pages.dev'
+    ];
+
+    const urgentWords = ['urgent','immediately','verify','verify your','verify account','suspend','suspended','limited time','action required','update your','reset your','confirm your'];
+    const credentialWords = ['password','ssn','credit card','pin','account number','verify identity','login','username'];
 
     const scanBtn = document.getElementById('scanBtn');
     const clearBtn = document.getElementById('clearBtn');
@@ -86,132 +97,80 @@
     const linksList = document.getElementById('linksList');
 
     function extractUrls(text){
-      const urls = [];
-      let match;
-      while((match = urlRegex.exec(text)) !== null){
-        urls.push(match[0]);
-      }
+      const urls = []; let match;
+      while((match = urlRegex.exec(text)) !== null){ urls.push(match[0]); }
       return urls;
     }
 
-    function domainFromUrl(url){
-      try{ const u = new URL(url); return u.hostname.replace(/:\d+$/,''); }catch(e){return null}
-    }
+    function domainFromUrl(url){ try{ return new URL(url).hostname; }catch(e){return null} }
 
-    function isIpHostname(host){ return /^\d+\.\d+\.\d+\.\d+$/.test(host); }
+    function isIp(host){ return /^\d+\.\d+\.\d+\.\d+$/.test(host); }
 
-    function containsSuspiciousTld(host){
-      if(!host) return false;
-      for(const t of suspiciousTlds) if(host.endsWith(t)) return true;
-      return false;
-    }
+    function hasSuspiciousTld(host){ return suspiciousTlds.some(t=>host.endsWith(t)); }
+
+    function isTunnel(host){ return tunnelDomains.some(t=>host.endsWith(t)); }
 
     function scoreMessage(text){
       let score = 0; const issues = [];
-
-      // Empty check
-      if(!text || text.trim().length < 5){ issues.push({type:'warn', msg:'Message is empty or too short.'}); return {score, issues}; }
+      if(!text.trim()){ issues.push({type:'warn',msg:'Message is empty.'}); return {score,issues}; }
 
       const lower = text.toLowerCase();
+      urgentWords.forEach(w=>{ if(lower.includes(w)){ score+=20; issues.push({type:'bad',msg:`Urgent phrasing detected ("${w}")`}); } });
+      credentialWords.forEach(w=>{ if(lower.includes(w)){ score+=30; issues.push({type:'bad',msg:`Sensitive info request detected ("${w}")`}); } });
 
-      // urgent language
-      for(const w of urgentWords){ if(lower.includes(w)){ score += 20; issues.push({type:'bad', msg:`Urgent / manipulative language found ("${w}").`}); } }
-
-      // credential requests
-      for(const w of credentialWords){ if(lower.includes(w)){ score += 30; issues.push({type:'bad', msg:`Request for credentials or sensitive data ("${w}"). Never share these.`}); } }
-
-      // presence of login-looking forms
-      if(/<form\b|name=\"password\"|type=\"password\"/i.test(text)){
-        score += 30; issues.push({type:'bad', msg:'HTML form or password field detected in message body.'});
-      }
-
-      // look for suspicious sender pattern
-      if(/from:\s*[^\n]+@[^\n]+/i.test(text)){
-        const from = text.match(/from:\s*([^\n]+)/i)[1].trim();
-        if(/support|service|admin|helpdesk|security|no-reply|noreply/i.test(from) && /@\w+\./.test(from)===false){ /* ignore */ }
-      }
-
-      // links
       const urls = extractUrls(text);
-      if(urls.length>0){
-        for(const u of urls){
-          score += 10;
-          const host = domainFromUrl(u);
-          if(host && isIpHostname(host)){ score += 20; issues.push({type:'bad', msg:`Link points to an IP address (${host}). Phishers sometimes use IP URLs.`}); }
-          if(host && tinyDomains.some(d=>host.includes(d))){ score += 18; issues.push({type:'warn', msg:`Shortened URL detected (${host}). Shorteners can hide final destination.`}); }
-          if(host && containsSuspiciousTld(host)){ score += 12; issues.push({type:'warn', msg:`Unusual or cheap TLD detected (${host}).`}); }
-          if(/@/.test(u) && u.includes('%40')){ score += 8; issues.push({type:'warn', msg:'Obfuscated email-like URL detected.'}); }
-        }
-      } else {
-        // no links — sometimes suspicious if message asks to click but no link shown
-        if(/click here|visit|open the link|go to|follow this/i.test(text)){
-          score += 12; issues.push({type:'warn', msg:'References a link but no visible URL found.'});
-        }
-      }
+      urls.forEach(u=>{
+        const host = domainFromUrl(u);
+        score += 10;
+        if(!host) return;
 
-      // look for mismatched display vs href (markdown or HTML)
-      const linkPatterns = Array.from(text.matchAll(/<a\s+[^>]*href=["']([^"']+)["'][^>]*>([^<]+)<\/a>/gi));
-      for(const m of linkPatterns){ const href=m[1], label=m[2]; if(!href.includes(label) && label.includes('.') ){ score += 15; issues.push({type:'warn', msg:'Hyperlink label and destination differ — possible spoofing.'}); } }
+        if(isIp(host)){ score+=25; issues.push({type:'bad',msg:`IP address link used (${host}).`}); }
+        if(tinyDomains.includes(host)){ score+=18; issues.push({type:'warn',msg:`Shortened URL detected (${host}).`}); }
+        if(hasSuspiciousTld(host)){ score+=15; issues.push({type:'warn',msg:`Suspicious TLD detected (${host}).`}); }
+        if(isTunnel(host)){ score+=50; issues.push({type:'bad',msg:`Cloudflare/Ngrok/Proxy Tunnel detected (${host}). These can hide phishing pages.`}); }
+        if(host.split('-').length > 3){ score+=10; issues.push({type:'warn', msg:`Unusual multi-hyphenated subdomain (${host}).`}); }
+      });
 
-      // check for common phishing keywords
-      const phishingKeywords = ['your account has been locked','verify your account','we detected unusual','confirm billing','update payment','security alert','suspend','unauthorized login'];
-      for(const k of phishingKeywords) if(lower.includes(k)) { score += 25; issues.push({type:'bad', msg:`Suspicious phrase found ("${k}").`}); }
-
-      // multiple language / broken grammar heuristic (very rough)
-      const punctuationRatio = (text.match(/[!?.,]/g)||[]).length / Math.max(1, text.split(/\s+/).length);
-      if(punctuationRatio > 0.25){ score += 6; issues.push({type:'warn', msg:'High punctuation density — sometimes used to create urgency.'}); }
-
-      return {score, issues};
+      return {score,issues};
     }
 
     function renderResults(text){
-      const {score, issues} = scoreMessage(text);
+      const {score,issues} = scoreMessage(text);
       issuesList.innerHTML = '';
       linksList.innerHTML = '';
 
-      // summary
-      let verdict = 'Unknown'; let color='';
-      if(score >= 80){ verdict = 'Very likely phishing'; color='bad'; }
-      else if(score >= 45){ verdict = 'Possibly phishing — caution'; color='warn'; }
-      else if(score > 0){ verdict = 'Low risk (but verify)'; color='good'; }
-      else { verdict = 'No obvious issues found'; color='good'; }
+      let verdict = 'Unknown';
+      if(score>=90) verdict='Very likely phishing';
+      else if(score>=50) verdict='Possibly phishing — caution';
+      else if(score>0) verdict='Low risk (but verify)';
+      else verdict='No obvious issues found';
+
       summaryText.textContent = `Risk: ${verdict} — score ${score}`;
 
-      if(issues.length === 0){ const div=document.createElement('div'); div.className='issue good'; div.textContent='No obvious red flags from basic heuristics — still double-check sender and links.'; issuesList.appendChild(div); }
-      else{
-        for(const it of issues){ const d=document.createElement('div'); d.className='issue '+(it.type==='bad'?'bad':it.type==='warn'?'warn':'good'); d.textContent = it.msg; issuesList.appendChild(d); }
+      if(issues.length===0){
+        const d=document.createElement('div'); d.className='issue good'; d.textContent='No red flags detected.'; issuesList.appendChild(d);
+      } else {
+        issues.forEach(it=>{
+          const d=document.createElement('div'); d.className='issue '+it.type; d.textContent=it.msg; issuesList.appendChild(d);
+        });
       }
 
-      // list links and domains
       const urls = extractUrls(text);
-      const seenHosts = new Set();
-      if(urls.length===0){ linksList.innerHTML = '<div style="color:var(--muted);font-size:13px">No http(s) links detected.</div>'; }
+      if(urls.length===0){ linksList.innerHTML='<div style="color:var(--muted);font-size:13px">No links detected.</div>'; }
       else{
-        for(const u of urls){ const host = domainFromUrl(u)||u; const row = document.createElement('div'); row.style.marginBottom='8px'; row.innerHTML = `<div class="link"><strong>${u}</strong></div><div style="font-size:13px;color:var(--muted)">Host: ${host}</div>`; linksList.appendChild(row); seenHosts.add(host); }
+        urls.forEach(u=>{
+          const host = domainFromUrl(u);
+          const row=document.createElement('div'); row.style.marginBottom='8px';
+          row.innerHTML = `<div class="link"><strong>${u}</strong></div><div style="font-size:13px;color:var(--muted)">Host: ${host}</div>`;
+          linksList.appendChild(row);
+        });
       }
 
-      // expose results area
-      resultsArea.style.display = 'grid';
+      resultsArea.style.display='grid';
     }
 
-    scanBtn.addEventListener('click', ()=>{
-      const text = messageEl.value || '';
-      renderResults(text);
-    });
-
-    clearBtn.addEventListener('click', ()=>{
-      messageEl.value = '';
-      resultsArea.style.display = 'none';
-      issuesList.innerHTML = '';
-      linksList.innerHTML = '';
-      summaryText.textContent = '—';
-    });
-
-    // quick sample paste helper (double-click footer to insert sample) — hidden convenience
-    document.querySelector('footer').addEventListener('dblclick', ()=>{
-      messageEl.value = `From: support@yourbank.example\nSubject: Urgent: verify your account now\n\nDear customer,\nWe have detected unusual activity on your account. Please verify your account immediately by clicking the link below to avoid suspension:\nhttps://yourbank.verify-login[.]com/login\n\nRegards,\nYourBank Security Team`;
-      renderResults(messageEl.value);
-    });
+    scanBtn.addEventListener('click',()=>renderResults(messageEl.value));
+    clearBtn.addEventListener('click',()=>{ messageEl.value=''; resultsArea.style.display='none'; issuesList.innerHTML=''; linksList.innerHTML=''; summaryText.textContent='—'; });
   </script>
 </body>
 </html>
